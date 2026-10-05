@@ -62,6 +62,7 @@ button,input,select{font:inherit}button{cursor:pointer;border:0}
 .number-input{width:100%;background:#0b1219;border:1px solid var(--line);border-radius:12px;padding:12px 14px 12px 42px;outline:none;color:#fff;transition:.2s ease}
 .text-input,.month-input{width:100%;background:#0b1219;border:1px solid var(--line);border-radius:12px;padding:12px 14px;outline:none;color:#fff}
 .number-input:focus,.text-input:focus,.month-input:focus{border-color:rgba(216,173,79,.55);box-shadow:0 0 0 4px rgba(216,173,79,.08);background:#0d151d}
+.number-input,.bill-input{font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .debt-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:#0a1118}.debt-table{width:100%;min-width:590px;border-collapse:collapse}
 .debt-table th,.debt-table td{padding:12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}.debt-table th{background:#0f171f;color:#758493;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.debt-table tr:last-child td{border-bottom:0}
 .platform-input,.bill-input{width:100%;border:1px solid transparent;background:transparent;padding:8px 9px;border-radius:9px;color:#fff;outline:none}.platform-input::placeholder,.bill-input::placeholder{color:#566473}.platform-input:focus,.bill-input:focus{border-color:var(--line-strong);background:#0d151d}.bill-input{min-width:165px;text-align:right}
@@ -182,7 +183,7 @@ button,input,select{font:inherit}button{cursor:pointer;border:0}
 <section class="content-grid">
 <div class="card">
 <div class="card-header"><div><div class="card-title">Keuangan Bulan Terpilih</div><div class="card-subtitle">Data tersimpan otomatis di browser perangkat ini.</div></div></div>
-<div class="income-box"><label class="field-label" for="incomeInput">Pendapatan bulan ini</label><div class="input-wrap"><span class="currency-prefix">Rp</span><input id="incomeInput" class="number-input" type="number" min="0" step="1000" placeholder="Contoh: 5000000" inputmode="numeric"></div></div>
+<div class="income-box"><label class="field-label" for="incomeInput">Pendapatan bulan ini</label><div class="input-wrap"><span class="currency-prefix">Rp</span><input id="incomeInput" class="number-input" type="text" inputmode="numeric" autocomplete="off" placeholder="Contoh: 5.000.000"></div></div>
 <div class="card-header"><div><div class="card-title">Daftar Tagihan / Pinjaman</div><div class="card-subtitle">Masukkan nama platform dan jumlah tagihan yang harus dibayar pada bulan tersebut.</div></div><button id="addDebtBtn" class="btn btn-primary">+ Tambah Tagihan</button></div>
 <div class="debt-table-wrap"><table class="debt-table"><thead><tr><th style="width:46%">Platform</th><th style="width:40%">Tagihan</th><th style="width:14%">Aksi</th></tr></thead><tbody id="debtBody"></tbody></table><div id="emptyState" class="empty-state"><strong>Belum ada tagihan</strong>Klik “Tambah Tagihan” untuk memasukkan platform pinjaman.</div><div class="table-total"><span>Total semua tagihan</span><strong id="tableTotal">Rp0</strong></div></div>
 <div class="footer-actions"><button id="clearMonthBtn" class="btn btn-soft">Kosongkan Bulan</button><button id="copySummaryBtn" class="btn btn-soft">Salin Ringkasan</button></div>
@@ -204,13 +205,100 @@ function saveState(){state.activeMonth=activeMonth;localStorage.setItem(STORAGE_
 function ensureMonth(key){if(!state.months[key])state.months[key]={income:0,debts:[]};if(!Array.isArray(state.months[key].debts))state.months[key].debts=[]}
 function getMonthData(){ensureMonth(activeMonth);return state.months[activeMonth]}
 function formatRupiah(v){return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(v)||0)}
-function parseMoney(v){const n=Number(v);return Number.isFinite(n)&&n>=0?n:0}
+function formatNumber(v){return new Intl.NumberFormat('id-ID',{maximumFractionDigits:0}).format(Number(v)||0)}
+function parseMoney(v){
+  if(typeof v==='number')return Number.isFinite(v)&&v>=0?v:0;
+  const digits=String(v??'').replace(/[^0-9]/g,'');
+  if(!digits)return 0;
+  const n=Number(digits);
+  return Number.isFinite(n)&&n>=0?n:0;
+}
+function formatMoneyInput(input){
+  const currentValue=input.value;
+  const currentPosition=input.selectionStart===null?currentValue.length:input.selectionStart;
+  const digitsBefore=(currentValue.slice(0,currentPosition).match(/\d/g)||[]).length;
+  const raw=currentValue.replace(/[^0-9]/g,'');
+  if(!raw){input.value='';return 0}
+  const amount=Number(raw);
+  input.value=formatNumber(amount);
+  if(document.activeElement===input){
+    let caret=0,seen=0;
+    while(caret<input.value.length&&seen<digitsBefore){if(/\d/.test(input.value[caret]))seen++;caret++}
+    try{input.setSelectionRange(caret,caret)}catch(e){}
+  }
+  return amount;
+}
 function totalBills(d){return d.debts.reduce((s,i)=>s+parseMoney(i.amount),0)}
 function currentDebtRatio(d){const income=parseMoney(d.income),bills=totalBills(d);if(!income)return bills>0?Infinity:0;return bills/income*100}
 function renderMonthSelect(){const keys=Object.keys(state.months).sort(),[ay,am]=activeMonth.split('-').map(Number),start=monthKey(ay,Math.max(1,am-6)),end=monthKey(ay+(am+6>12?1:0),((am+6-1)%12)+1),extended=new Set([...keys,...monthKeysBetween(start,end)]),finalKeys=[...extended].sort();els.monthSelect.innerHTML=finalKeys.map(k=>`<option value="${k}" ${k===activeMonth?'selected':''}>${escapeHtml(monthLabel(k))}</option>`).join('')}
-function renderDebts(){const d=getMonthData();els.debtBody.innerHTML='';els.emptyState.style.display=d.debts.length===0?'block':'none';d.debts.forEach((debt,index)=>{const tr=document.createElement('tr');const platformTd=document.createElement('td'),platformInput=document.createElement('input');platformInput.className='platform-input';platformInput.type='text';platformInput.placeholder='Contoh: Kredivo';platformInput.value=debt.platform||'';platformInput.addEventListener('input',()=>{d.debts[index].platform=platformInput.value;saveState();renderHistory()});platformTd.appendChild(platformInput);const billTd=document.createElement('td'),billInput=document.createElement('input');billInput.className='bill-input';billInput.type='number';billInput.min='0';billInput.step='1000';billInput.inputMode='numeric';billInput.placeholder='0';billInput.value=debt.amount||'';billInput.addEventListener('input',()=>{d.debts[index].amount=parseMoney(billInput.value);saveState();render()});billTd.appendChild(billInput);const actionTd=document.createElement('td'),removeBtn=document.createElement('button');removeBtn.className='btn btn-danger';removeBtn.textContent='Hapus';removeBtn.addEventListener('click',()=>{d.debts.splice(index,1);saveState();render();showToast('Tagihan dihapus.')});actionTd.appendChild(removeBtn);tr.append(platformTd,billTd,actionTd);els.debtBody.appendChild(tr)});els.tableTotal.textContent=formatRupiah(totalBills(d))}
+function renderDebts(){
+  const d=getMonthData();
+  els.debtBody.innerHTML='';
+  els.emptyState.style.display=d.debts.length===0?'block':'none';
+  d.debts.forEach((debt,index)=>{
+    const tr=document.createElement('tr');
+
+    const platformTd=document.createElement('td');
+    const platformInput=document.createElement('input');
+    platformInput.className='platform-input';
+    platformInput.type='text';
+    platformInput.placeholder='Contoh: Kredivo';
+    platformInput.autocomplete='off';
+    platformInput.value=debt.platform||'';
+    platformInput.addEventListener('input',()=>{
+      d.debts[index].platform=platformInput.value;
+      saveState();
+      renderHistory();
+    });
+    platformTd.appendChild(platformInput);
+
+    const billTd=document.createElement('td');
+    const billInput=document.createElement('input');
+    billInput.className='bill-input';
+    billInput.type='text';
+    billInput.inputMode='numeric';
+    billInput.autocomplete='off';
+    billInput.placeholder='0';
+    billInput.value=debt.amount?formatNumber(debt.amount):'';
+    billInput.addEventListener('input',()=>{
+      const amount=formatMoneyInput(billInput);
+      d.debts[index].amount=amount;
+      saveState();
+      updateCalculatedViews();
+    });
+    billInput.addEventListener('blur',()=>{
+      const amount=parseMoney(billInput.value);
+      d.debts[index].amount=amount;
+      billInput.value=amount?formatNumber(amount):'';
+      saveState();
+      updateCalculatedViews();
+    });
+    billTd.appendChild(billInput);
+
+    const actionTd=document.createElement('td');
+    const removeBtn=document.createElement('button');
+    removeBtn.className='btn btn-danger';
+    removeBtn.textContent='Hapus';
+    removeBtn.addEventListener('click',()=>{
+      d.debts.splice(index,1);
+      saveState();
+      render();
+      showToast('Tagihan dihapus.');
+    });
+    actionTd.appendChild(removeBtn);
+
+    tr.append(platformTd,billTd,actionTd);
+    els.debtBody.appendChild(tr);
+  });
+  els.tableTotal.textContent=formatRupiah(totalBills(d));
+}
 function renderHistory(){const keys=Object.keys(state.months).sort().reverse();if(!keys.length){els.historyList.innerHTML='<div class="empty-state">Belum ada riwayat bulan.</div>';return}els.historyList.innerHTML=keys.map(k=>{const d=state.months[k],b=totalBills(d),i=parseMoney(d.income),bal=i-b;return `<div class="history-item" data-month="${k}"><div><div class="history-month">${escapeHtml(monthLabel(k))}</div><div class="history-meta">${d.debts.length} platform · Pendapatan ${formatRupiah(i)}</div></div><div class="history-total">${formatRupiah(bal)}</div></div>`}).join('');document.querySelectorAll('.history-item').forEach(item=>item.addEventListener('click',()=>{activeMonth=item.dataset.month;ensureMonth(activeMonth);saveState();render();window.scrollTo({top:0,behavior:'smooth'})}))}
-function renderCalculations(){const d=getMonthData(),income=parseMoney(d.income),bills=totalBills(d),balance=income-bills,ratio=currentDebtRatio(d),platforms=d.debts.length,avg=platforms?bills/platforms:0;els.incomeInput.value=income||'';els.selectedMonthText.textContent=`Periode: ${monthLabel(activeMonth)}`;els.summaryIncome.textContent=formatRupiah(income);els.summaryBills.textContent=formatRupiah(bills);els.summaryBalance.textContent=formatRupiah(balance);els.summaryRatio.textContent=Number.isFinite(ratio)?`${ratio.toFixed(1)}%`:'—';els.summaryBalanceNote.textContent=balance>=0?'Masih tersedia setelah tagihan':'Defisit setelah tagihan';els.detailIncome.textContent=formatRupiah(income);els.detailBills.textContent=formatRupiah(bills);els.detailPlatforms.textContent=platforms;els.detailAverage.textContent=formatRupiah(avg);els.resultBalance.textContent=formatRupiah(balance);els.resultStatus.className='result-box';if(income===0&&bills===0){els.resultStatus.classList.add('neutral');els.resultDescription.textContent='Masukkan pendapatan dan tagihan untuk melihat hasil perhitungan.';els.progressBar.style.width='0%'}else if(balance>=0){els.resultStatus.classList.add('positive');if(bills===0){els.resultDescription.textContent='Belum ada tagihan yang tercatat pada bulan ini.';els.progressBar.style.width='0%'}else{const pct=income>0?Math.min(bills/income*100,100):100;els.resultDescription.textContent=`Setelah semua tagihan, sisa pendapatan adalah ${formatRupiah(balance)}.`;els.progressBar.style.width=`${pct}%`}}else{els.resultStatus.classList.add('negative');els.resultDescription.textContent=`Pendapatan masih kurang ${formatRupiah(Math.abs(balance))} untuk menutup semua tagihan.`;els.progressBar.style.width='100%'}}
+function renderCalculations(syncInput=true){const d=getMonthData(),income=parseMoney(d.income),bills=totalBills(d),balance=income-bills,ratio=currentDebtRatio(d),platforms=d.debts.length,avg=platforms?bills/platforms:0;if(syncInput&&document.activeElement!==els.incomeInput)els.incomeInput.value=income?formatNumber(income):'';els.selectedMonthText.textContent=`Periode: ${monthLabel(activeMonth)}`;els.summaryIncome.textContent=formatRupiah(income);els.summaryBills.textContent=formatRupiah(bills);els.summaryBalance.textContent=formatRupiah(balance);els.summaryRatio.textContent=Number.isFinite(ratio)?`${ratio.toFixed(1)}%`:'—';els.summaryBalanceNote.textContent=balance>=0?'Masih tersedia setelah tagihan':'Defisit setelah tagihan';els.detailIncome.textContent=formatRupiah(income);els.detailBills.textContent=formatRupiah(bills);els.detailPlatforms.textContent=platforms;els.detailAverage.textContent=formatRupiah(avg);els.resultBalance.textContent=formatRupiah(balance);els.resultStatus.className='result-box';if(income===0&&bills===0){els.resultStatus.classList.add('neutral');els.resultDescription.textContent='Masukkan pendapatan dan tagihan untuk melihat hasil perhitungan.';els.progressBar.style.width='0%'}else if(balance>=0){els.resultStatus.classList.add('positive');if(bills===0){els.resultDescription.textContent='Belum ada tagihan yang tercatat pada bulan ini.';els.progressBar.style.width='0%'}else{const pct=income>0?Math.min(bills/income*100,100):100;els.resultDescription.textContent=`Setelah semua tagihan, sisa pendapatan adalah ${formatRupiah(balance)}.`;els.progressBar.style.width=`${pct}%`}}else{els.resultStatus.classList.add('negative');els.resultDescription.textContent=`Pendapatan masih kurang ${formatRupiah(Math.abs(balance))} untuk menutup semua tagihan.`;els.progressBar.style.width='100%'}}
+function updateCalculatedViews(){
+  renderCalculations(false);
+  renderHistory();
+  els.tableTotal.textContent=formatRupiah(totalBills(getMonthData()));
+}
 function addDebt(){const d=getMonthData();d.debts.push({id:(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random()),platform:'',amount:0});saveState();render();setTimeout(()=>{const inputs=document.querySelectorAll('.platform-input');inputs[inputs.length-1]?.focus()},50)}
 function changeMonth(offset){const[y,m]=activeMonth.split('-').map(Number),date=new Date(y,m-1+offset,1);activeMonth=monthKey(date.getFullYear(),date.getMonth()+1);ensureMonth(activeMonth);saveState();render()}
 function clearMonth(){if(!confirm(`Kosongkan seluruh data untuk ${monthLabel(activeMonth)}?\n\nPendapatan dan semua tagihan bulan ini akan dihapus.`))return;state.months[activeMonth]={income:0,debts:[]};saveState();render();showToast('Data bulan berhasil dikosongkan.')}
@@ -218,7 +306,7 @@ async function copySummary(){const d=getMonthData(),income=parseMoney(d.income),
 function showToast(message){els.toast.textContent=message;els.toast.classList.add('show');clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>els.toast.classList.remove('show'),2200)}
 function escapeHtml(v){return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
 function render(){ensureMonth(activeMonth);renderMonthSelect();renderDebts();renderCalculations();renderHistory()}
-els.monthSelect.addEventListener('change',e=>{activeMonth=e.target.value;ensureMonth(activeMonth);saveState();render()});els.prevMonth.addEventListener('click',()=>changeMonth(-1));els.nextMonth.addEventListener('click',()=>changeMonth(1));els.incomeInput.addEventListener('input',()=>{getMonthData().income=parseMoney(els.incomeInput.value);saveState();renderCalculations();renderHistory()});let deferredInstallPrompt=null;
+els.monthSelect.addEventListener('change',e=>{activeMonth=e.target.value;ensureMonth(activeMonth);saveState();render()});els.prevMonth.addEventListener('click',()=>changeMonth(-1));els.nextMonth.addEventListener('click',()=>changeMonth(1));els.incomeInput.addEventListener('input',()=>{const amount=formatMoneyInput(els.incomeInput);getMonthData().income=amount;saveState();renderCalculations(false);renderHistory()});els.incomeInput.addEventListener('blur',()=>{const amount=parseMoney(els.incomeInput.value);getMonthData().income=amount;els.incomeInput.value=amount?formatNumber(amount):'';saveState();renderCalculations(false);renderHistory()});let deferredInstallPrompt=null;
 window.addEventListener('beforeinstallprompt',(event)=>{event.preventDefault();deferredInstallPrompt=event;document.getElementById('installBtn').classList.add('show')});
 document.getElementById('installBtn').addEventListener('click',async()=>{if(!deferredInstallPrompt)return;deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;document.getElementById('installBtn').classList.remove('show')});
 window.addEventListener('appinstalled',()=>{document.getElementById('installBtn').classList.remove('show');showToast('KeuanganKu berhasil dipasang.')});
